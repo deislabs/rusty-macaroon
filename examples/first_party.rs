@@ -18,5 +18,5 @@ fn main() {
     let data = serde_json::to_string(&m).unwrap();
     println!("{}", data);
     let deserialized: Macaroon = serde_json::from_str(&data).unwrap();
-    println!("{:?}", deserialized.signature.0 == m.signature.0)
+    println!("{:?}", deserialized.signature == m.signature)
 }

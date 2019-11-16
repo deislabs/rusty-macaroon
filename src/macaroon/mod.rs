@@ -5,15 +5,13 @@ use sodiumoxide::crypto::auth::{Key, authenticate};
 use crate::Result;
 use failure::format_err;
 use std::fmt;
-use std::marker::PhantomData;
 
 // An implementation that represents any binary data. By spec, most fields in a
 // macaroon support binary encoded as base64, so ByteString has methods to
 // convert to and from base64 strings
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ByteString(pub Vec<u8>);
 
-// TODO: Implement PartialEq for strings
 impl ByteString {
     // Takes a base64 encoded string and turns it into a decoded ByteString
     fn new_from_base64(v: &str) -> Result<ByteString> {
