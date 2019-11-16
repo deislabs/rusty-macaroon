@@ -1,14 +1,16 @@
 use std::cell::RefCell;
-use serde::{Serialize, Deserialize, Serializer};
+use serde::{Serialize, Deserialize, Serializer, Deserializer};
+use serde::de::Visitor;
 use sodiumoxide::crypto::auth::{Key, authenticate};
 use crate::Result;
 use failure::format_err;
 use std::fmt;
+use std::marker::PhantomData;
 
 // An implementation that represents any binary data. By spec, most fields in a
 // macaroon support binary encoded as base64, so ByteString has methods to
 // convert to and from base64 strings
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ByteString(pub Vec<u8>);
 
 // TODO: Implement PartialEq for strings
@@ -44,6 +46,36 @@ impl Serialize for ByteString {
         S: Serializer,
     {
         serializer.serialize_str(&self.to_string())
+    }
+}
+
+struct ByteStringVisitor;
+
+impl<'de> Visitor<'de> for ByteStringVisitor {
+    type Value = ByteString;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("base64 encoded string of bytes")
+    }
+
+    fn visit_str<E>(self, value: &str) -> std::result::Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        let raw = match base64::decode(value) {
+            Ok(v) => v,
+            Err(_) => return Err(E::custom("unable to base64 decode value"))
+        };
+        Ok(ByteString(raw))
+    }
+}
+
+impl<'de> Deserialize<'de> for ByteString {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<ByteString, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(ByteStringVisitor)
     }
 }
 
