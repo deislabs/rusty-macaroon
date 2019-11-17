@@ -9,7 +9,7 @@ use std::fmt;
 // An implementation that represents any binary data. By spec, most fields in a
 // macaroon support binary encoded as base64, so ByteString has methods to
 // convert to and from base64 strings
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ByteString(pub Vec<u8>);
 
 impl ByteString {
@@ -22,6 +22,12 @@ impl ByteString {
 
 impl From<&str> for ByteString {
     fn from(s: &str) -> ByteString {
+        ByteString(s.as_bytes().to_vec())
+    }
+}
+
+impl From<String> for ByteString {
+    fn from(s: String) -> ByteString {
         ByteString(s.as_bytes().to_vec())
     }
 }
@@ -60,11 +66,11 @@ impl<'de> Visitor<'de> for ByteStringVisitor {
     where
         E: serde::de::Error,
     {
-        let raw = match base64::decode(value) {
+        let bs = match ByteString::new_from_base64(value) {
             Ok(v) => v,
             Err(_) => return Err(E::custom("unable to base64 decode value"))
         };
-        Ok(ByteString(raw))
+        Ok(bs)
     }
 }
 
@@ -117,13 +123,8 @@ pub struct Caveat {
 impl Macaroon {
     pub const VERSION: usize = 2;
 
-    // TODO: Maybe just pass through the crypto Key type and have the rest just be a list of bytes
-    pub fn new(key: ByteString, identifier: ByteString, location: Option<String>) -> Result<Macaroon> {
-        let converted_key = match Key::from_slice(&key.0) {
-            Some(k) => k,
-            None => return Err(format_err!("Key is not 32 bytes"))
-        };
-        let sig = authenticate(&identifier.0, &converted_key);
+    pub fn new(key: &Key, identifier: ByteString, location: Option<String>) -> Result<Macaroon> {
+        let sig = authenticate(&identifier.0, key);
         let mut m = Macaroon::default();
         m.identifier = identifier;
         m.location = location;
@@ -134,6 +135,11 @@ impl Macaroon {
     fn sig_to_key(&self) -> Result<Key> {
         let key = Key::from_slice(&self.signature.0).ok_or_else(|| format_err!("key is incorrect length"))?;
         Ok(key)
+    }
+
+    // Returns a copy of the current list of caveats
+    pub fn get_caveats(&self) -> Vec<Caveat> {
+        self.caveats.borrow().clone()
     }
 
     pub fn add_first_party_caveat(&mut self, c: Caveat) -> Result<()> {
