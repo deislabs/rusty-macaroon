@@ -38,14 +38,13 @@ impl Verifier {
     }
 
     fn verify_sig(&self, m: &Macaroon, key: &Key) -> Result<()> {
-        let mut sig = authenticate(&m.identifier.0, key).0;
+        let mut sig = ByteString(authenticate(&m.identifier.0, key).0.to_vec());
         for c in m.get_caveats() {
             // This should never fail, but we handle errors in case anything
             // fishy goes on
-            let tmpkey = Key::from_slice(&sig).ok_or_else(|| format_err!("key is incorrect length"))?;
-            sig = authenticate(&c.identifier.0, &tmpkey).0
+            sig = Macaroon::hash_first_party(&sig, &c.identifier)?;
         }
-        if ByteString(sig.to_vec()) != m.signature {
+        if sig != m.signature {
             return Err(format_err!("signature is not valid"))
         }
         Ok(())

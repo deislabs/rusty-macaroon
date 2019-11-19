@@ -22,7 +22,7 @@ With that said, here is what is done and not done.
 
 - [x] Create a new macaroon
 - [x] Add first-party caveats
-- [ ] Add third-party caveats
+- [x] Add third-party caveats
 - [x] Validate macaroon with first-party caveats
 - [ ] Validate macaroon with third-party caveats
 - [x] Serialize and deserialize macaroons from JSON
