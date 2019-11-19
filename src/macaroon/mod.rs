@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 use serde::de::Visitor;
 use sodiumoxide::crypto::auth::{Key, authenticate};
@@ -95,14 +94,14 @@ pub struct Macaroon {
     #[serde(rename = "s")]
     pub signature: ByteString,
     #[serde(rename = "c")]
-    caveats: RefCell<Vec<Caveat>>,
+    caveats: Vec<Caveat>,
 }
 
 impl Default for Macaroon {
     fn default() -> Macaroon {
         Macaroon{
             version: Macaroon::VERSION,
-            caveats: RefCell::new(Vec::new()),
+            caveats: Vec::new(),
             identifier: Default::default(),
             location: None,
             signature: Default::default(),
@@ -132,24 +131,55 @@ impl Macaroon {
         Ok(m)
     }
 
-    fn sig_to_key(&self) -> Result<Key> {
-        let key = Key::from_slice(&self.signature.0).ok_or_else(|| format_err!("key is incorrect length"))?;
+    fn sig_to_key(sig: &ByteString) -> Result<Key> {
+        let key = Key::from_slice(&sig.0).ok_or_else(|| format_err!("key is incorrect length"))?;
         Ok(key)
+    }
+
+    pub fn hash_first_party(sig: &ByteString, identifier: &ByteString) -> Result<ByteString> {
+        let sig = authenticate(&identifier.0, &Self::sig_to_key(sig)?);
+        Ok(ByteString(sig.0.to_vec()))
+    }
+
+    pub fn hash_third_party(sig: &ByteString, identifier: &ByteString, vid: &ByteString) -> Result<ByteString> {
+        let sig1 = authenticate(&identifier.0, &Self::sig_to_key(sig)?);
+        let sig2 = authenticate(&vid.0, &Self::sig_to_key(&ByteString(sig1.0.to_vec()))?);
+        Ok(ByteString(sig2.0.to_vec()))
     }
 
     // Returns a copy of the current list of caveats
     pub fn get_caveats(&self) -> Vec<Caveat> {
-        self.caveats.borrow().clone()
+        self.caveats.clone()
+    }
+
+    // Returns a copy of the current list of third party caveats
+    pub fn get_third_party_caveats(&self) -> Vec<Caveat> {
+        self.caveats.iter().filter(|c| c.location.is_some()).map(|c| c.clone()).collect()
     }
 
     pub fn add_first_party_caveat(&mut self, c: Caveat) -> Result<()> {
         if c.verification_id.0.len() != 0 || c.location.is_some() {
             return Err(format_err!("a first party caveat should not contain a verification id or location"))
         }
-        let sig = authenticate(&c.identifier.0, &self.sig_to_key()?);
-        self.signature = ByteString(sig.0.to_vec());
-        self.caveats.borrow_mut().push(c);
+        self.signature = Self::hash_first_party(&self.signature, &c.identifier)?;
+        self.caveats.push(c);
+        
+        Ok(())
+    }
 
+    pub fn add_third_party_caveat(&mut self, caveat_key: &Key, c: Caveat) -> Result<()> {
+        if c.location.is_none() {
+            return Err(format_err!("a third party caveat must contain a location"))
+        }
+        if c.verification_id.0.len() != 0 {
+            return Err(format_err!("a new third party caveat should not contain a verification id"))
+        }
+        let mut caveat_copy = c.clone();
+        caveat_copy.verification_id = ByteString(authenticate(&self.signature.0, caveat_key).0.to_vec());
+        
+        self.signature = Self::hash_third_party(&self.signature, &c.identifier, &caveat_copy.verification_id)?;
+        self.caveats.push(caveat_copy);
+        
         Ok(())
     }
 }
