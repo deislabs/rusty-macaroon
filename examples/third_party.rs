@@ -31,4 +31,18 @@ fn main() {
     println!("{}", data);
     let deserialized: Macaroon = serde_json::from_str(&data).unwrap();
     println!("{:?}", deserialized.signature == m.signature);
+
+    // Create discharge macaroon and bind it
+    let mut discharge = Macaroon::new(&caveat_key, "foo = bar".into(), Some("http://my.auth".into())).unwrap();
+    discharge.add_first_party_caveat(Caveat{
+        identifier: "bar = baz".into(),
+        ..Default::default()
+    }).unwrap();
+    let discharge_bound = m.prepare_for_request(&discharge).unwrap();
+
+    // Succeeding verification
+    let mut v = Verifier::default();
+    v.satisfy_exact("foo = bar".into());
+    v.satisfy_exact("bar = baz".into());
+    v.verify(&m, &key, vec![discharge_bound]).unwrap();
 }

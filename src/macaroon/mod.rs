@@ -1,6 +1,7 @@
 use serde::{Serialize, Deserialize, Serializer, Deserializer};
 use serde::de::Visitor;
 use sodiumoxide::crypto::auth::{Key, authenticate};
+use sodiumoxide::crypto::secretbox;
 use crate::Result;
 use failure::format_err;
 use std::fmt;
@@ -8,7 +9,7 @@ use std::fmt;
 // An implementation that represents any binary data. By spec, most fields in a
 // macaroon support binary encoded as base64, so ByteString has methods to
 // convert to and from base64 strings
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ByteString(pub Vec<u8>);
 
 impl ByteString {
@@ -142,14 +143,20 @@ impl Macaroon {
     }
 
     pub fn hash_third_party(sig: &ByteString, identifier: &ByteString, vid: &ByteString) -> Result<ByteString> {
-        let sig1 = authenticate(&identifier.0, &Self::sig_to_key(sig)?);
-        let sig2 = authenticate(&vid.0, &Self::sig_to_key(&ByteString(sig1.0.to_vec()))?);
-        Ok(ByteString(sig2.0.to_vec()))
+        let key = &Self::sig_to_key(sig)?;
+        let mut sig1 = authenticate(&vid.0, key).0.to_vec();
+        let sig2 = authenticate(&identifier.0, key).0.to_vec();
+        sig1.extend(sig2);
+        Ok(ByteString(authenticate(&sig1, key).0.to_vec()))
     }
 
     // Returns a copy of the current list of caveats
     pub fn get_caveats(&self) -> Vec<Caveat> {
         self.caveats.clone()
+    }
+
+    pub fn get_first_party_caveats(&self) -> Vec<Caveat> {
+        self.caveats.iter().filter(|c| c.location.is_none()).map(|c| c.clone()).collect()
     }
 
     // Returns a copy of the current list of third party caveats
@@ -175,11 +182,64 @@ impl Macaroon {
             return Err(format_err!("a new third party caveat should not contain a verification id"))
         }
         let mut caveat_copy = c.clone();
-        caveat_copy.verification_id = ByteString(authenticate(&self.signature.0, caveat_key).0.to_vec());
+        // Here we encrypt the caveat key with the signature using a nonce. The
+        // nonce becomes part of the verification ID. So the final message is
+        // NONCE+ENCODED_SECRET_DATA
+        caveat_copy.verification_id = encrypt(&self.signature, caveat_key)?;
         
         self.signature = Self::hash_third_party(&self.signature, &c.identifier, &caveat_copy.verification_id)?;
         self.caveats.push(caveat_copy);
         
         Ok(())
+    }
+
+    // Binds the given mararoon to the request by hashing the two signatures
+    // together and returning a new macaroon
+    pub fn prepare_for_request(&mut self, discharge_macaroon: &Macaroon) -> Result<Macaroon> {
+        let mut d = discharge_macaroon.clone();
+        d.signature = Self::hash_third_party(&ByteString(vec![0; sodiumoxide::crypto::auth::KEYBYTES]), &self.signature, &d.signature)?;
+        Ok(d)
+    }
+}
+
+pub fn key_from_str(s: &str) -> Result<Key> {
+    let strbytes = s.as_bytes();
+    if strbytes.len() > sodiumoxide::crypto::auth::KEYBYTES {
+        return Err(format_err!("key is too long"))
+    }
+    let mut raw: Vec<u8> = vec![0; sodiumoxide::crypto::auth::KEYBYTES];
+    raw.splice(raw.len()-strbytes.len().., strbytes.iter().cloned());
+    let key = Key::from_slice(&raw).ok_or_else(|| format_err!("key is incorrect length"))?;
+    Ok(key)
+}
+
+fn encrypt(sig: &ByteString, key: &Key) -> Result<ByteString> {
+    // Convert the key to a secretbox key
+    let k = match secretbox::Key::from_slice(&sig.0) {
+        Some(v) => v,
+        None => return Err(format_err!("invalid key length"))
+    };
+    let nonce = secretbox::gen_nonce();
+    let mut msg = nonce.0.to_vec();
+    let tmp = secretbox::seal(&key.0, &nonce, &k);
+    msg.extend(tmp);
+
+    Ok(ByteString(msg))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn string_key() {
+        let test_key = "a test";
+        let k = key_from_str(test_key).unwrap();
+        let reparsed_key = std::str::from_utf8(&k.0).unwrap();
+        assert!(reparsed_key.contains(test_key));
+
+        // Long key should error
+        let test_key = "To be, or not to be? That is the question. Whether 'tis nobler in the mind to suffer the slings of fortune...";
+        let res = key_from_str(test_key);
+        assert!(res.is_err());
     }
 }

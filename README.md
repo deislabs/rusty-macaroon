@@ -7,11 +7,14 @@ implementation](https://github.com/rescrv/libmacaroons) with a focus on the [v2
 spec](https://github.com/rescrv/libmacaroons/blob/master/doc/format.txt).
 
 ## Examples
-There is currently a fully working example in the [examples
-directory](./examples). To run it, simply execute:
+There are currently two fully working examples in the [examples
+directory](./examples). To run them, simply execute:
 
 ```shell
+# First party only caveats
 $ cargo run --example first_party
+# With third party caveats
+$ cargo run --example third_party
 ```
 
 ## Current Status
@@ -24,7 +27,7 @@ With that said, here is what is done and not done.
 - [x] Add first-party caveats
 - [x] Add third-party caveats
 - [x] Validate macaroon with first-party caveats
-- [ ] Validate macaroon with third-party caveats
+- [x] Validate macaroon with third-party caveats
 - [x] Serialize and deserialize macaroons from JSON
 - [ ] Serialize and deserialize macaroons using v2 binary format
 - [ ] Unit tests

@@ -41,11 +41,11 @@ fn main() {
     v.satisfy_exact("user = me".into());
     // A general expiry example
     v.satisfy_general(Box::new(is_expired));
-    v.verify(&m, &key).unwrap();
+    v.verify(&m, &key, Vec::new()).unwrap();
 
     let correct_sig = m.signature.clone();
     m.signature = "ohnoesthisisbad".into();
-    match v.verify(&m, &key) {
+    match v.verify(&m, &key, Vec::new()) {
         Ok(_) => (),
         Err(e) => println!("Someone messed with me {:?}", e)
     };
@@ -57,7 +57,7 @@ fn main() {
         identifier: "bar = baz".into(),
         ..Default::default()
     }).unwrap();
-    match v.verify(&m, &key) {
+    match v.verify(&m, &key, Vec::new()) {
         Ok(_) => (),
         Err(e) => println!("I didn't validate {:?}", e)
     };
